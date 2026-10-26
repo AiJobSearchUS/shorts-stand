@@ -51,11 +51,16 @@ chat completions, so any Lemonade model works — pick by VRAM, not by vendor.
 
 ### Configuration
 
-| Env var            | Default                          | What it does              |
-|--------------------|----------------------------------|---------------------------|
-| `LEMONADE_BASE_URL`| `http://localhost:13305/api/v1`  | Model server endpoint     |
-| `LEMONADE_MODEL`   | `Qwen3-8B`                       | Model name to request     |
-| `LEMONADE_TIMEOUT` | `900`                            | Seconds per LLM call (raise on slow/CPU hosts) |
+| Env var               | Default                          | What it does              |
+|-----------------------|----------------------------------|---------------------------|
+| `LEMONADE_BASE_URL`   | `http://localhost:13305/api/v1`  | Model server endpoint     |
+| `LEMONADE_MODEL`      | `Qwen3-8B`                       | Chat model name to request |
+| `LEMONADE_TTS_MODEL`  | `kokoro-v1`                      | Text-to-speech model (voiceover audio) |
+| `LEMONADE_TTS_VOICE`  | `af_heart`                       | TTS voice                 |
+| `LEMONADE_STT_MODEL`  | `Whisper-Large-v3-Turbo`         | Speech-to-text model (take transcription) |
+| `LEMONADE_VISION_MODEL` | `Gemma-4-E2B-it-GGUF`          | Vision model (thumbnail critique) |
+| `LEMONADE_IMAGE_MODEL` | `SDXL-Turbo`                    | Image model (thumbnail concepts) |
+| `LEMONADE_TIMEOUT`    | `900`                            | Seconds per API call (raise on slow/CPU hosts) |
 
 Flags `--base-url` / `--model` override the env vars. Point it at LM Studio,
 Ollama, or vLLM and it just works — Lemonade is the default, not a lock-in.
@@ -77,7 +82,58 @@ Enter a topic, niche, and duration → the page polls a background generation
 job against your local Lemonade server, then renders hooks, the timestamped
 script, voiceover, captions, and metadata with one-click downloads of every
 pack file (`script.md`, `voiceover.txt`, `captions.srt`, `metadata.json`,
-`raw_model_output.md`).
+`raw_model_output.md`). Tick **Voiceover audio** to also get `voiceover.wav`
+(see below).
+
+## v2 — Omni
+
+v1 used Lemonade for text. v2 uses the rest of the omni stack — speech,
+transcription, and vision — all through the same OpenAI-compatible local
+endpoint, still stdlib-only.
+
+### 🎙 Voiceover audio (TTS)
+
+Packs can ship the actual narration, not just the script for it:
+
+```bash
+python -m shorts_stand.cli "5 side hustles with no money" --voice
+# → pack includes voiceover.wav, synthesized by kokoro-v1
+```
+
+The web UI has the same option as a checkbox. If the speech endpoint or
+model isn't available, the pack still completes — you get a warning, not a
+crash. Model/voice: `LEMONADE_TTS_MODEL` / `LEMONADE_TTS_VOICE`.
+
+### 🎧 Take transcription (Whisper)
+
+Already recorded a take? Turn it into a pack — transcript, captions timed
+from Whisper's real segment timestamps (never fabricated), and a cleaned-up
+script derived from your own words:
+
+```bash
+python -m shorts_stand.cli transcribe my-take.wav --out take-pack
+# → transcript.txt, captions.srt, script.md, metadata.json
+#   (metadata.json carries "source": "take-transcription")
+```
+
+Model: `LEMONADE_STT_MODEL` (default `Whisper-Large-v3-Turbo`).
+
+### 👁 Thumbnail critique (vision)
+
+Score a thumbnail or first frame before you post — 1–10 for scroll-stop
+power, on-screen text legibility, framing/composition, and lighting/clarity,
+plus the top 3 concrete fixes and a one-line verdict:
+
+```bash
+python -m shorts_stand.cli critique thumb.png --topic "5AM morning routine"
+# → vision-critique.md next to the image (or in --out)
+
+python -m shorts_stand.cli critique thumb.png --topic "..." --concepts
+# → also saves concept-1.png: an SDXL-Turbo thumbnail concept from the topic
+```
+
+Models: `LEMONADE_VISION_MODEL` (default `Gemma-4-E2B-it-GGUF`) and
+`LEMONADE_IMAGE_MODEL` (default `SDXL-Turbo`).
 
 ## Example
 
@@ -89,15 +145,19 @@ generated through Lemonade Server with `Qwen3-4B-Instruct-2507-GGUF`
 
 ## Testing
 
-No GPU? No problem — a stub OpenAI-compatible server is included:
+No GPU? No problem — a stub OpenAI-compatible server is included (it fakes
+chat, speech, transcription, vision, and image generation):
 
 ```bash
-python tests/smoke.py   # spins up the mock, runs the CLI, verifies the pack
+python tests/smoke.py   # spins up the mock, runs the CLI through all flows:
+                        # topic pack, --voice pack, transcribe, critique,
+                        # and a TTS-outage degradation case
 ```
 
 ## Roadmap
 
 - [x] Web UI (single page, stdlib-only `web.py`, talks to Lemonade via background jobs)
+- [x] v2 Omni: TTS voiceover audio, Whisper take transcription, vision thumbnail critique
 - [ ] Whisper-based caption re-timing against real voiceover audio
 - [ ] Direct export into video pipelines (script → TTS → captioned render)
 - [ ] Multi-language packs
