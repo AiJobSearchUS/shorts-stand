@@ -1,0 +1,5 @@
+# Local runtime artifacts — never commit
+logs/
+__pycache__/
+*.pyc
+.DS_Store
