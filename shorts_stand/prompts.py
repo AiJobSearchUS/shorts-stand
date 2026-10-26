@@ -47,6 +47,31 @@ def creative(topic, niche, duration_sec, hook_count=3):
     ]
 
 
+def take_script(transcript, duration_sec):
+    """Clean a recorded take's transcript into the standard pack sections."""
+    system = (
+        "You are Shorts Stand, a pre-production assistant for short-form video. "
+        "A creator recorded a take; you turn the raw transcript into a clean, "
+        "shootable script. Keep the creator's own words and meaning — fix "
+        "filler words, false starts, and rambling; do not invent new claims. "
+        "Output only the requested sections."
+    )
+    user = (
+        f"The take runs about {duration_sec} seconds. Raw transcript:\n\n"
+        f"{transcript[:6000]}\n\n"
+        f"Write exactly these sections:\n{SCRIPT_FORMAT}\n"
+        f"Rules:\n"
+        f"- HOOKS: pull the 3 strongest lines from the take itself, lightly polished.\n"
+        f"- SCRIPT beats must tile the full {duration_sec}s with no gaps, following\n"
+        f"  the order of the transcript; VO lines are the cleaned spoken words.\n"
+        f"- VOICEOVER is the full cleaned narration, matching the SCRIPT beats."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
 def metadata(topic, niche, script_excerpt):
     system = (
         "You are Shorts Stand's packaging assistant. "

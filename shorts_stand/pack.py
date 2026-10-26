@@ -71,6 +71,21 @@ def _parse_json_lenient(text):
     return json.loads(text)
 
 
+def _parse_beats(sections):
+    beats = []
+    for m in BEAT_RE.finditer(sections.get("SCRIPT", "")):
+        beats.append(
+            {
+                "start": m.group(1),
+                "end": m.group(2),
+                "vo": m.group(3).strip(),
+                "text": m.group(4).strip(),
+                "shot": m.group(5).strip(),
+            }
+        )
+    return beats
+
+
 def _render_script_md(topic, niche, duration_sec, hooks, beats):
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     script_md = (
@@ -102,18 +117,7 @@ def generate_pack(topic, niche, duration_sec, client, outdir, with_voice=False):
 
     creative_out = client.chat(prompts.creative(topic, niche, duration_sec))
     sections = _split_sections(creative_out)
-
-    beats = []
-    for m in BEAT_RE.finditer(sections.get("SCRIPT", "")):
-        beats.append(
-            {
-                "start": m.group(1),
-                "end": m.group(2),
-                "vo": m.group(3).strip(),
-                "text": m.group(4).strip(),
-                "shot": m.group(5).strip(),
-            }
-        )
+    beats = _parse_beats(sections)
 
     meta_out = client.chat(
         prompts.metadata(topic, niche, sections.get("SCRIPT", "")[:1500]),
@@ -161,4 +165,81 @@ def generate_pack(topic, niche, duration_sec, client, outdir, with_voice=False):
         "title": meta.get("title", ""),
         "files": sorted(files),
         "warnings": warnings,
+    }
+
+
+def segments_to_srt(segments):
+    """Build SRT captions from transcription segments (real timestamps)."""
+    lines = []
+    for i, seg in enumerate(segments, 1):
+        start = _srt_timestamp(float(seg.get("start", 0)))
+        end = _srt_timestamp(float(seg.get("end", 0)))
+        lines.append(f"{i}\n{start} --> {end}\n{str(seg.get('text', '')).strip()}\n")
+    return "\n".join(lines)
+
+
+def transcribe_take(audio_path, client, outdir):
+    """Transcribe a recorded take (Whisper) and derive a production pack.
+
+    Writes transcript.txt and captions.srt (from the transcription's real
+    segment timestamps) first, then a cleaned-up script.md + metadata.json
+    via the same prompts machinery as generate_pack. If the transcription
+    has no segments, no captions are fabricated — metadata.json notes why.
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    data = client.transcribe(audio_path)
+    transcript = (data.get("text") or "").strip()
+    segments = data.get("segments") or []
+
+    files = {"transcript.txt": transcript + "\n"}
+    if segments:
+        files["captions.srt"] = segments_to_srt(segments)
+    _write_files(outdir, files)  # transcript lands even if cleanup fails
+
+    duration = data.get("duration")
+    if not duration and segments:
+        duration = segments[-1].get("end", 0)
+    duration_sec = int(round(float(duration))) if duration else 60
+
+    script_out = client.chat(prompts.take_script(transcript, duration_sec),
+                             temperature=0.5)
+    sections = _split_sections(script_out)
+    beats = _parse_beats(sections)
+    hooks = sections.get("HOOKS", "")
+
+    meta_out = client.chat(
+        prompts.metadata(transcript[:200], "recorded take",
+                         sections.get("SCRIPT", "")[:1500]),
+        temperature=0.5,
+        max_tokens=600,
+    )
+    try:
+        meta = _parse_json_lenient(meta_out)
+    except json.JSONDecodeError:
+        meta = {"title": "", "description": "", "hashtags": [], "pinned_comment": "",
+                "_raw": meta_out}
+    meta["source"] = "take-transcription"
+    meta["audio_file"] = os.path.basename(audio_path)
+    meta["duration_sec"] = duration_sec
+    if not segments:
+        meta["captions"] = ("skipped — the transcription returned no segments, "
+                            "so there are no real timestamps to build captions from")
+
+    title = meta.get("title") or "Recorded take"
+    files.update({
+        "script.md": _render_script_md(title, "recorded take", duration_sec,
+                                       hooks, beats),
+        "metadata.json": json.dumps(meta, indent=2, ensure_ascii=False) + "\n",
+        "raw_model_output.md": script_out + "\n\n---\n\n" + meta_out + "\n",
+    })
+    _write_files(outdir, files)
+
+    return {
+        "outdir": outdir,
+        "beats": len(beats),
+        "segments": len(segments),
+        "title": meta.get("title", ""),
+        "files": sorted(files),
+        "warnings": [],
     }
