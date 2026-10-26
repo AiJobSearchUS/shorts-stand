@@ -1,6 +1,6 @@
 # Lemonade Developer Challenge — entry draft for Shorts Stand 🍋
 
-> Status: DRAFT — needs Christopher's approval before submission.
+> Status: READY — repo live; awaiting Christopher's go-ahead to submit the AMD form.
 
 ## Project name
 Shorts Stand — a local-AI pre-production studio for short-form video
@@ -48,8 +48,8 @@ camera. Cloud LLM APIs tax every idea; Shorts Stand makes ideation free and
 private — your niche, your voice, your hardware.
 
 ## Links (fill in when live)
-- GitHub repo: <TODO — publish, then paste URL>
-- Demo video: recorded and ready at `demo/shorts-stand-demo.mp4` (25s, 1280x720 — awaiting Christopher's upload, then paste URL)
+- GitHub repo: https://github.com/AiJobSearchUS/shorts-stand
+- Demo video: https://github.com/AiJobSearchUS/shorts-stand/blob/main/demo/shorts-stand-demo.mp4 (25s, 1280x720, committed in-repo)
 - Discord #AMDDevChallenge post: <TODO — Christopher posts, then paste URL>
 
 ## Judging criteria mapping
