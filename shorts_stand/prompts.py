@@ -4,6 +4,10 @@ Two LLM calls per pack:
   1. creative() -> hooks, timestamped script (VO + on-screen text + shot
      direction), and clean voiceover narration.
   2. metadata() -> title, description, hashtags as JSON.
+
+v2 additions: take_script() (clean a recorded take's transcript into the
+same sections), critique() (vision scoring of a thumbnail/frame), and
+thumbnail_concept() (image-generation prompt for concept thumbnails).
 """
 
 SCRIPT_FORMAT = """\
@@ -70,6 +74,51 @@ def take_script(transcript, duration_sec):
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+CRITIQUE_SYSTEM = (
+    "You are Shorts Stand's thumbnail coach for short-form video. You judge "
+    "a single frame the way a scroller's thumb does: in under a second. "
+    "Be specific and blunt — vague praise helps nobody. Score only what is "
+    "actually visible in the image."
+)
+
+CRITIQUE_FORMAT = """\
+## Scores
+- Scroll-stop power: <1-10> — <one short reason>
+- On-screen text legibility: <1-10> — <one short reason>
+- Framing/composition: <1-10> — <one short reason>
+- Lighting/clarity: <1-10> — <one short reason>
+
+## Top 3 fixes
+1. <most impactful concrete change>
+2. <second concrete change>
+3. <third concrete change>
+
+## Verdict
+<one line: post it, fix it first, or reshoot — and why>
+"""
+
+
+def critique(topic):
+    """User prompt for the vision critique (image attached by the client)."""
+    subject = f' for a video about "{topic}"' if topic else ""
+    return (
+        f"This is a thumbnail / first frame{subject} for a short-form video "
+        f"(TikTok / Shorts / Reels). Judge it as a viewer mid-scroll.\n\n"
+        f"Reply with exactly this structure, no extra sections:\n{CRITIQUE_FORMAT}"
+    )
+
+
+def thumbnail_concept(topic):
+    """Image-generation prompt for a thumbnail concept."""
+    subject = topic or "a short-form video"
+    return (
+        f"Bold YouTube Shorts thumbnail concept for {subject}: one expressive "
+        f"creator face in the foreground, high contrast, saturated colors, "
+        f"dramatic lighting, clean uncluttered background, space for large "
+        f"text on the left third, no text or letters in the image"
+    )
 
 
 def metadata(topic, niche, script_excerpt):

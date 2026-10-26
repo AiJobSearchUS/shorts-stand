@@ -243,3 +243,45 @@ def transcribe_take(audio_path, client, outdir):
         "files": sorted(files),
         "warnings": [],
     }
+
+
+def critique_image(image_path, topic, client, outdir, concepts=False):
+    """Score a thumbnail / first frame with the vision model.
+
+    Writes vision-critique.md. With concepts=True, also asks the image
+    model for thumbnail concept PNG(s) next to it — guarded like TTS:
+    an image-endpoint failure degrades to a warning, never a lost critique.
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    critique = client.vision(image_path, prompts.critique(topic),
+                             system=prompts.CRITIQUE_SYSTEM)
+
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    subject = f' for "{topic}"' if topic else ""
+    md = (
+        f"# Thumbnail critique{subject}\n\n"
+        f"_Critiqued {stamp} with Shorts Stand (local vision model via Lemonade) — "
+        f"image: {os.path.basename(image_path)}_\n\n"
+        f"{critique}\n"
+    )
+
+    warnings = []
+    files = {"vision-critique.md": md}
+    if concepts:
+        try:
+            images = client.generate_image(prompts.thumbnail_concept(topic))
+            for i, png in enumerate(images[:2], 1):
+                files[f"concept-{i}.png"] = png
+        except RuntimeError as e:
+            warnings.append(f"thumbnail concepts skipped: {e}")
+            files["vision-critique.md"] = md + (
+                f"\n_Thumbnail concepts skipped: {e}_\n")
+
+    _write_files(outdir, files)
+
+    return {
+        "outdir": outdir,
+        "files": sorted(files),
+        "warnings": warnings,
+    }

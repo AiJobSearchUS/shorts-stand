@@ -3,6 +3,7 @@
   python -m shorts_stand.cli "topic" [--niche ...] [--duration 45] [--voice]
   python -m shorts_stand.cli generate "topic" ...        (same, explicit)
   python -m shorts_stand.cli transcribe <audio_file> --out <dir>
+  python -m shorts_stand.cli critique <image_file> [--topic "..."] [--concepts]
 """
 
 import argparse
@@ -10,9 +11,9 @@ import os
 import sys
 
 from .client import LemonadeClient
-from .pack import generate_pack, transcribe_take
+from .pack import critique_image, generate_pack, transcribe_take
 
-COMMANDS = ("generate", "transcribe")
+COMMANDS = ("generate", "transcribe", "critique")
 
 
 def _slug(text, fallback):
@@ -95,6 +96,46 @@ def _transcribe(argv):
     return 0
 
 
+def _critique(argv):
+    p = argparse.ArgumentParser(
+        prog="shorts-stand critique",
+        description="Score a thumbnail / first frame with the vision model.",
+    )
+    p.add_argument("image", help="Thumbnail or first-frame image (png, jpg, ...)")
+    p.add_argument("--topic", default="",
+                   help="Video topic the frame is for (sharpens the critique)")
+    p.add_argument("--out", default=None,
+                   help="Output directory (default: alongside the image)")
+    p.add_argument("--concepts", action="store_true",
+                   help="Also generate thumbnail concept image(s) from the topic")
+    p.add_argument("--base-url", default=None, help="Override LEMONADE_BASE_URL")
+    p.add_argument("--model", default=None,
+                   help="Override LEMONADE_MODEL (vision uses LEMONADE_VISION_MODEL)")
+    args = p.parse_args(argv)
+
+    if not os.path.exists(args.image):
+        print(f"\nERROR: no such image file: {args.image}", file=sys.stderr)
+        return 1
+    outdir = os.path.abspath(
+        args.out or os.path.dirname(os.path.abspath(args.image)))
+
+    client = LemonadeClient(base_url=args.base_url, model=args.model)
+    print(f"Critiquing with {client.vision_model} at {client.base_url} ...")
+    try:
+        result = critique_image(args.image, args.topic, client, outdir,
+                                concepts=args.concepts)
+    except RuntimeError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        return 1
+
+    for w in result.get("warnings", []):
+        print(f"WARNING: {w}", file=sys.stderr)
+    print(f"\nCritique ready in {result['outdir']}")
+    for f in result["files"]:
+        print(f"  - {f}")
+    return 0
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in COMMANDS:
@@ -104,6 +145,8 @@ def main(argv=None):
         cmd, rest = "generate", argv
     if cmd == "transcribe":
         return _transcribe(rest)
+    if cmd == "critique":
+        return _critique(rest)
     return _generate(rest)
 
 
