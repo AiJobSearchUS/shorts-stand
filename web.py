@@ -27,6 +27,7 @@ from shorts_stand.pack import generate_pack
 
 FILES = ["script.md", "voiceover.txt", "captions.srt", "metadata.json",
          "raw_model_output.md"]
+DOWNLOADABLE = FILES + ["voiceover.wav"]  # binary; downloadable, not rendered
 
 jobs = {}  # job_id -> {"status": ..., ...}
 jobs_lock = threading.Lock()
@@ -63,20 +64,23 @@ def _read_pack(outdir):
     return {"meta": meta, "beats": beats, "files": data}
 
 
-def _run_job(job_id, topic, niche, duration):
+def _run_job(job_id, topic, niche, duration, voice=False):
     outdir = os.path.join(tempfile.gettempdir(), f"shorts-stand-{job_id}")
     try:
         # 127.0.0.1, not localhost: avoids IPv6 resolution flakiness on some boxes.
         client = LemonadeClient(
             base_url=os.environ.get("LEMONADE_BASE_URL",
                                     "http://127.0.0.1:13305/api/v1"))
-        result = generate_pack(topic, niche, duration, client, outdir)
+        result = generate_pack(topic, niche, duration, client, outdir,
+                               with_voice=voice)
         pack = _read_pack(outdir)
         with jobs_lock:
             jobs[job_id].update({
                 "status": "done",
                 "topic": topic, "niche": niche, "duration": duration,
                 "beats": result["beats"], "title": result["title"],
+                "files": result["files"],
+                "warnings": result.get("warnings", []),
                 "hooks": _parse_hooks(
                     open(os.path.join(outdir, "script.md"), encoding="utf-8")
                     .read().split("## Recommended hook")[1]
@@ -139,6 +143,9 @@ h2{font-size:1.15rem;margin:0 0 8px}
     <div><label>Duration (sec)</label>
       <input id="duration" type="number" value="45" min="10" max="180"></div>
   </div>
+  <label style="display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer">
+    <input type="checkbox" id="voice" style="width:auto;margin:0">
+    <span>🎙 Voiceover audio — also synthesize voiceover.wav (TTS)</span></label>
   <button id="go" onclick="generate()">Generate pack</button>
   <div id="status"></div>
 </div>
@@ -153,7 +160,8 @@ async function generate(){
   $('out').innerHTML='';
   $('status').innerHTML='<span class="spin"></span>Asking the local model… (a 4B model takes a few minutes)';
   let r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({topic,niche:$('niche').value,duration:parseInt($('duration').value)||45})});
+    body:JSON.stringify({topic,niche:$('niche').value,duration:parseInt($('duration').value)||45,
+      voice:$('voice').checked})});
   const {job_id}=await r.json();
   const t0=Date.now();
   while(true){
@@ -180,7 +188,8 @@ function render(j,id){
   h+='<div class="card"><h2>📦 Metadata</h2><p><b>'+esc(m.title||'')+'</b></p><p>'+esc(m.description||'')+'</p>'+
     '<p>'+(m.hashtags||[]).map(t=>'<span class="tag">#'+esc(t)+'</span>').join('')+'</p>'+
     (m.pinned_comment?'<p>📌 '+esc(m.pinned_comment)+'</p>':'')+'</div>';
-  h+='<div class="card"><h2>⬇ Downloads</h2>'+['script.md','voiceover.txt','captions.srt','metadata.json','raw_model_output.md'].map(dl).join('')+'</div>';
+  h+='<div class="card"><h2>⬇ Downloads</h2>'+(j.files||['script.md','voiceover.txt','captions.srt','metadata.json','raw_model_output.md']).map(dl).join('')+
+    ((j.warnings&&j.warnings.length)?'<p class="err">'+j.warnings.map(esc).join('<br>')+'</p>':'')+'</div>';
   $('out').innerHTML=h;
 }
 // Demo hook: ?autostart=1[&topic=..&niche=..&duration=..] fills the form and
@@ -223,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, safe)
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "download":
             job_id, fname = parts[2], parts[3]
-            if fname not in FILES or not re.fullmatch(r"[0-9a-f-]{36}", job_id):
+            if fname not in DOWNLOADABLE or not re.fullmatch(r"[0-9a-f-]{36}", job_id):
                 return self._json(400, {"error": "bad request"})
             path = os.path.join(tempfile.gettempdir(), f"shorts-stand-{job_id}", fname)
             if not os.path.exists(path):
@@ -250,12 +259,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "topic is required"})
             niche = str(payload.get("niche", "") or "general audience").strip()
             duration = max(10, min(180, int(payload.get("duration", 45))))
+            voice = bool(payload.get("voice", False))
         except (ValueError, json.JSONDecodeError):
             return self._json(400, {"error": "invalid JSON payload"})
         job_id = str(uuid.uuid4())
         with jobs_lock:
             jobs[job_id] = {"status": "running", "started": time.time()}
-        t = threading.Thread(target=_run_job, args=(job_id, topic, niche, duration),
+        t = threading.Thread(target=_run_job,
+                             args=(job_id, topic, niche, duration, voice),
                              daemon=True)
         t.start()
         # prune old jobs

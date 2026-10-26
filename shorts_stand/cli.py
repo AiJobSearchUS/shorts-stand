@@ -20,6 +20,8 @@ def main(argv=None):
                    help="Target duration in seconds (default: 45)")
     p.add_argument("--out", default=None,
                    help="Output directory (default: ./pack-<slug>)")
+    p.add_argument("--voice", action="store_true",
+                   help="Also synthesize voiceover.wav with the TTS model")
     p.add_argument("--base-url", default=None, help="Override LEMONADE_BASE_URL")
     p.add_argument("--model", default=None, help="Override LEMONADE_MODEL")
     args = p.parse_args(argv)
@@ -31,11 +33,14 @@ def main(argv=None):
     client = LemonadeClient(base_url=args.base_url, model=args.model)
     print(f"Talking to model server at {client.base_url} (model: {client.model}) ...")
     try:
-        result = generate_pack(args.topic, args.niche, args.duration, client, outdir)
+        result = generate_pack(args.topic, args.niche, args.duration, client,
+                               outdir, with_voice=args.voice)
     except RuntimeError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         return 1
 
+    for w in result.get("warnings", []):
+        print(f"WARNING: {w}", file=sys.stderr)
     print(f"\nPack ready in {result['outdir']}")
     print(f"  beats: {result['beats']}  hooks: {result['hooks']}")
     print(f"  title: {result['title']}")

@@ -71,7 +71,33 @@ def _parse_json_lenient(text):
     return json.loads(text)
 
 
-def generate_pack(topic, niche, duration_sec, client, outdir):
+def _render_script_md(topic, niche, duration_sec, hooks, beats):
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    script_md = (
+        f"# {topic}\n\n_Pack generated {stamp} with Shorts Stand (local LLM via Lemonade)._  \n"
+        f"Niche: {niche} · Target duration: {duration_sec}s\n\n"
+        f"## Recommended hook\n{hooks}\n\n## Script\n"
+    )
+    for b in beats:
+        script_md += (
+            f"- **[{b['start']}-{b['end']}]** \U0001f3a4 {b['vo']}  \n"
+            f"  \U0001f4ac On-screen: _{b['text']}_  \n"
+            f"  \U0001f3ac Shot: {b['shot']}\n"
+        )
+    if not beats:
+        script_md += "_Beats did not parse — see raw_model_output.md._\n"
+    return script_md
+
+
+def _write_files(outdir, files):
+    for name, content in files.items():
+        mode = "wb" if isinstance(content, bytes) else "w"
+        kwargs = {} if mode == "wb" else {"encoding": "utf-8"}
+        with open(os.path.join(outdir, name), mode, **kwargs) as f:
+            f.write(content)
+
+
+def generate_pack(topic, niche, duration_sec, client, outdir, with_voice=False):
     os.makedirs(outdir, exist_ok=True)
 
     creative_out = client.chat(prompts.creative(topic, niche, duration_sec))
@@ -106,31 +132,27 @@ def generate_pack(topic, niche, duration_sec, client, outdir):
     srt = beats_to_srt(beats) if beats else _estimate_srt(voiceover, duration_sec)
 
     # --- write the pack ---
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    script_md = (
-        f"# {topic}\n\n_Pack generated {stamp} with Shorts Stand (local LLM via Lemonade)._  \n"
-        f"Niche: {niche} · Target duration: {duration_sec}s\n\n"
-        f"## Recommended hook\n{hooks}\n\n## Script\n"
-    )
-    for b in beats:
-        script_md += (
-            f"- **[{b['start']}-{b['end']}]** \U0001f3a4 {b['vo']}  \n"
-            f"  \U0001f4ac On-screen: _{b['text']}_  \n"
-            f"  \U0001f3ac Shot: {b['shot']}\n"
-        )
-    if not beats:
-        script_md += "_Beats did not parse — see raw_model_output.md._\n"
-
     files = {
-        "script.md": script_md,
+        "script.md": _render_script_md(topic, niche, duration_sec, hooks, beats),
         "voiceover.txt": voiceover + "\n",
         "captions.srt": srt,
         "metadata.json": json.dumps(meta, indent=2, ensure_ascii=False) + "\n",
         "raw_model_output.md": creative_out + "\n\n---\n\n" + meta_out + "\n",
     }
-    for name, content in files.items():
-        with open(os.path.join(outdir, name), "w", encoding="utf-8") as f:
-            f.write(content)
+
+    warnings = []
+    if with_voice:
+        if voiceover.strip():
+            try:
+                files["voiceover.wav"] = client.speech(voiceover)
+            except RuntimeError as e:
+                # TTS is an add-on: a missing endpoint/model must never
+                # cost the creator the rest of the pack.
+                warnings.append(f"voiceover audio skipped: {e}")
+        else:
+            warnings.append("voiceover audio skipped: no voiceover text parsed")
+
+    _write_files(outdir, files)
 
     return {
         "outdir": outdir,
@@ -138,4 +160,5 @@ def generate_pack(topic, niche, duration_sec, client, outdir):
         "hooks": len([h for h in hooks.splitlines() if h.strip().startswith(tuple("123456789"))]),
         "title": meta.get("title", ""),
         "files": sorted(files),
+        "warnings": warnings,
     }
